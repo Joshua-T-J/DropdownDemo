@@ -4,6 +4,7 @@ export { DropdownWrapperComponent } from './dropdown-wrapper.component';
 export type { DropdownConfig } from './dropdown-wrapper.component';
 export {
   DROPDOWN_ADAPTER,
+  DROPDOWN_ADAPTER_CLASS,
 } from './dropdown-adapters/dropdown-adapter.interface';
 export type {
   DropdownAdapter,

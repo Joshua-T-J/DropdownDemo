@@ -42,13 +42,13 @@ export interface DropdownAdapterOptions {
   /** Animate the dropdown open/close transition */
   isAnimated: boolean;
 
-  /** Whether typeahead search is case-sensitive (ComboBox native) */
+  /** Whether typeahead search is case-sensitive */
   caseSensitiveSearch: boolean;
 
-  /** Auto-expand the input text on focus (DropDown native) */
+  /** Auto-expand the input text on focus */
   autoExpandSelection: boolean;
 
-  /** Optional header text rendered at the top of the popup (ComboBox native) */
+  /** Optional header text rendered at the top of the popup */
   header: string;
 
   /** Disable user interaction */
@@ -86,95 +86,72 @@ export interface DropdownAdapterOptions {
  * specific library like Wijmo or Material.
  */
 export interface DropdownAdapter<TControl = unknown> {
-  /**
-   * Initialise the underlying control and attach it to `hostElement`.
-   * This is called once after the host element enters the DOM.
-   */
+  /** Initialise the underlying control and attach it to `hostElement`. */
   init(options: DropdownAdapterOptions): void;
 
-  /**
-   * Return the currently selected value.
-   */
+  /** Return the currently selected value. */
   getValue(): any;
 
-  /**
-   * Set the selected value programmatically.
-   */
+  /** Set the selected value programmatically. */
   setValue(value: any): void;
 
-  /**
-   * Replace the items array on the underlying control.
-   */
+  /** Replace the items array on the underlying control. */
   setItemsSource(items: any[]): void;
 
-  /**
-   * Enable or disable the control.
-   */
+  /** Enable or disable the control. */
   setDisabled(isDisabled: boolean): void;
 
-  /**
-   * Set the control read-only state.
-   */
+  /** Set the control read-only state. */
   setReadOnly(isReadOnly: boolean): void;
 
-  /**
-   * Open the dropdown popup.
-   */
+  /** Open the dropdown popup. */
   open(): void;
 
-  /**
-   * Close the dropdown popup.
-   */
+  /** Close the dropdown popup. */
   close(): void;
 
-  /**
-   * Toggle the dropdown popup.
-   */
+  /** Toggle the dropdown popup. */
   toggle(): void;
 
-  /**
-   * Focus the underlying input element.
-   */
+  /** Focus the underlying input element. */
   focus(): void;
 
-  /**
-   * Clear the selection and input text.
-   */
+  /** Clear the selection and input text. */
   clear(): void;
 
-  /**
-   * Refresh / re-filter the items list.
-   */
+  /** Refresh / re-filter the items list. */
   refresh(): void;
 
-  /**
-   * Return the raw underlying control instance for advanced usage.
-   * The caller is responsible for casting to the correct type.
-   */
+  /** Return the raw underlying control instance for advanced usage. */
   getControlInstance(): TControl | null;
 
-  /**
-   * Tear down event listeners, dispose internal objects, remove DOM nodes
-   * created by the adapter. Called by the wrapper in ngOnDestroy.
-   */
+  /** Tear down event listeners, dispose internal objects, remove DOM nodes. */
   destroy(): void;
 }
 
-// ─── Injection token ──────────────────────────────────────────────────────────
+// ─── Injection tokens ─────────────────────────────────────────────────────────
 
 /**
- * Provide a class that implements DropdownAdapter via this token.
+ * Token for the adapter CLASS (constructor).
+ *
+ * Override this in a module or component to switch the adapter implementation.
+ * A new instance is created per component via Angular's injector, so every
+ * dropdown gets its own independent adapter — no shared-singleton problem.
  *
  * @example
- * // app.config.ts
- * providers: [
- *   { provide: DROPDOWN_ADAPTER, useClass: WijmoDropdownAdapter }
- * ]
+ * // Whole module uses Material:
+ * { provide: DROPDOWN_ADAPTER_CLASS, useValue: MaterialDropdownAdapter }
  *
- * // or per-component
- * @Component({
- *   providers: [{ provide: DROPDOWN_ADAPTER, useClass: MaterialDropdownAdapter }]
- * })
+ * // Single component override:
+ * @Component({ providers: [{ provide: DROPDOWN_ADAPTER_CLASS, useValue: MyAdapter }] })
+ */
+export const DROPDOWN_ADAPTER_CLASS = new InjectionToken<new (...args: any[]) => DropdownAdapter>(
+  'DropdownAdapterClass'
+);
+
+/**
+ * Token for the adapter INSTANCE resolved per component.
+ * Override DROPDOWN_ADAPTER_CLASS, not this token.
  */
 export const DROPDOWN_ADAPTER = new InjectionToken<DropdownAdapter>(
   'DropdownAdapter'

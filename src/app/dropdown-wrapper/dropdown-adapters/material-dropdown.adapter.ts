@@ -26,6 +26,9 @@ import { takeUntil } from 'rxjs/operators';
   standalone: true,
   imports: [MatFormFieldModule, MatSelectModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // 'data-mat-adapter' forces Angular to generate a unique component ID,
+  // preventing NG0912 collisions when multiple instances exist in the same app.
+  host: { 'data-mat-adapter': '' },
   template: `
     <mat-form-field style="width: 100%;">
       <mat-select
@@ -33,7 +36,8 @@ import { takeUntil } from 'rxjs/operators';
         [placeholder]="placeholder"
         [disabled]="disabled"
         [panelClass]="panelClass"
-        [value]="value">
+        [value]="value"
+      >
         @for (item of items; track $index) {
           <mat-option [value]="resolveValue(item)">
             {{ resolveText(item) }}
@@ -104,26 +108,26 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     this._componentRef = componentRef;
     this._matSelect = componentRef.instance.matSelect();
 
-    this._matSelect.selectionChange
-      .pipe(takeUntil(this._destroy$))
-      .subscribe((event) => {
-        const selectedItem =
-          options.itemsSource?.find(
-            (item, index) =>
-              componentRef.instance.resolveValue(item) === event.value &&
-              index === event.source.options.toArray().findIndex((o) => o.value === event.value)
-          ) ??
-          options.itemsSource?.find((item) => componentRef.instance.resolveValue(item) === event.value) ??
-          null;
+    this._matSelect.selectionChange.pipe(takeUntil(this._destroy$)).subscribe((event) => {
+      const selectedItem =
+        options.itemsSource?.find(
+          (item, index) =>
+            componentRef.instance.resolveValue(item) === event.value &&
+            index === event.source.options.toArray().findIndex((o) => o.value === event.value),
+        ) ??
+        options.itemsSource?.find(
+          (item) => componentRef.instance.resolveValue(item) === event.value,
+        ) ??
+        null;
 
-        this._value = event.value;
-        options.onValueChange({
-          value: event.value,
-          item: selectedItem,
-          index: options.itemsSource?.indexOf(selectedItem) ?? -1,
-          text: selectedItem != null ? componentRef.instance.resolveText(selectedItem) : '',
-        });
+      this._value = event.value;
+      options.onValueChange({
+        value: event.value,
+        item: selectedItem,
+        index: options.itemsSource?.indexOf(selectedItem) ?? -1,
+        text: selectedItem != null ? componentRef.instance.resolveText(selectedItem) : '',
       });
+    });
 
     this._matSelect.openedChange
       .pipe(takeUntil(this._destroy$))
@@ -133,7 +137,9 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     this._removeBlurListener = this._bindHostEvent('blur', () => options.onBlur());
   }
 
-  getValue(): any { return this._value; }
+  getValue(): any {
+    return this._value;
+  }
 
   setValue(value: any): void {
     this._value = value;
@@ -170,9 +176,15 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     }
   }
 
-  open(): void { this._matSelect?.open(); }
-  close(): void { this._matSelect?.close(); }
-  toggle(): void { this._matSelect?.toggle(); }
+  open(): void {
+    this._matSelect?.open();
+  }
+  close(): void {
+    this._matSelect?.close();
+  }
+  toggle(): void {
+    this._matSelect?.toggle();
+  }
 
   focus(): void {
     if (this._matSelect) {

@@ -129,8 +129,28 @@ export interface DropdownAdapter<TControl = unknown> {
   destroy(): void;
 }
 
-// ─── Injection token ──────────────────────────────────────────────────────────
+// ─── Injection tokens ─────────────────────────────────────────────────────────
 
-export const DROPDOWN_ADAPTER = new InjectionToken<DropdownAdapter>(
-  'DropdownAdapter'
+/**
+ * Token for the adapter CLASS (constructor).
+ *
+ * Override this in a module or component to switch the adapter implementation.
+ * A new instance is created per component via Angular's injector, so every
+ * dropdown gets its own independent adapter — no shared-singleton problem.
+ *
+ * @example
+ * // Whole module uses Material:
+ * { provide: DROPDOWN_ADAPTER_CLASS, useValue: MaterialDropdownAdapter }
+ *
+ * // Single component override:
+ * @Component({ providers: [{ provide: DROPDOWN_ADAPTER_CLASS, useValue: MyAdapter }] })
+ */
+export const DROPDOWN_ADAPTER_CLASS = new InjectionToken<new (...args: any[]) => DropdownAdapter>(
+  'DropdownAdapterClass',
 );
+
+/**
+ * Token for the adapter INSTANCE resolved per component.
+ * Override DROPDOWN_ADAPTER_CLASS, not this token.
+ */
+export const DROPDOWN_ADAPTER = new InjectionToken<DropdownAdapter>('DropdownAdapter');

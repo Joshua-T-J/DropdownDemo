@@ -4,13 +4,14 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  EnvironmentInjector,
   Inject,
   Injector,
   OnDestroy,
   Optional,
-  Self,
   ViewChild,
   computed,
+  createEnvironmentInjector,
   effect,
   forwardRef,
   inject,
@@ -22,12 +23,9 @@ import {
 import {
   AbstractControl,
   ControlValueAccessor,
-  NgControl,
-  ReactiveFormsModule,
   ValidationErrors,
   Validator,
   ValidatorFn,
-  Validators,
   NG_VALIDATORS,
   NG_VALUE_ACCESSOR,
 } from '@angular/forms';
@@ -37,8 +35,8 @@ import {
   DropdownAdapterOptions,
   DropdownChangeEvent,
   DROPDOWN_ADAPTER,
+  DROPDOWN_ADAPTER_CLASS,
 } from './dropdown-adapters/dropdown-adapter.interface';
-import { WijmoDropdownAdapter } from './dropdown-adapters/wijmo-dropdown.adapter';
 
 // ─── Public config type ───────────────────────────────────────────────────────
 
@@ -61,20 +59,18 @@ export interface DropdownConfig {
   imports: [],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [
-    // Self-provide CVA so ngModel / formControl work without @Self injection issues
+    // CVA — lets Angular forms (formControlName, formControl, ngModel) bind here
     {
       provide: NG_VALUE_ACCESSOR,
       useExisting: forwardRef(() => DropdownWrapperComponent),
       multi: true,
     },
-    // Self-provide Validator so required / custom validators integrate with forms
+    // Validator — integrates required/custom validators with the forms API
     {
       provide: NG_VALIDATORS,
       useExisting: forwardRef(() => DropdownWrapperComponent),
       multi: true,
     },
-    // Default adapter — can be overridden per-component or per-module
-    { provide: DROPDOWN_ADAPTER, useClass: WijmoDropdownAdapter },
   ],
   templateUrl: './dropdown-wrapper.component.html',
   styleUrls: ['./dropdown-wrapper.component.scss'],
@@ -91,8 +87,40 @@ export class DropdownWrapperComponent
 
   private readonly _destroyRef = inject(DestroyRef);
   private readonly _injector = inject(Injector);
+  private readonly _envInjector = inject(EnvironmentInjector);
 
-  constructor(@Inject(DROPDOWN_ADAPTER) private readonly _adapter: DropdownAdapter) {}
+  /**
+   * The adapter instance — one per component, never shared.
+   *
+   * We create a child EnvironmentInjector per component instance. This is the
+   * only way to get Angular to construct the adapter class fresh each time
+   * (useClass at module level creates a singleton). The child injector MUST
+   * stay alive for as long as the adapter lives, because the adapter's own
+   * inject() calls (ApplicationRef, EnvironmentInjector, etc.) are satisfied
+   * through it. We destroy it in ngOnDestroy after destroying the adapter.
+   */
+  private readonly _adapter: DropdownAdapter;
+  private readonly _adapterInjector: EnvironmentInjector;
+
+  constructor() {
+    const AdapterClass = this._injector.get(DROPDOWN_ADAPTER_CLASS, null);
+
+    if (!AdapterClass) {
+      throw new Error(
+        '[DropdownWrapperComponent] No DROPDOWN_ADAPTER_CLASS found in the injector tree. ' +
+          'Import DropdownWrapperModule (provides WijmoDropdownAdapter by default), or ' +
+          'provide { provide: DROPDOWN_ADAPTER_CLASS, useValue: YourAdapterClass }.',
+      );
+    }
+
+    // Create a child injector with AdapterClass as a local (non-singleton) provider.
+    // Parent is the real app EnvironmentInjector so ApplicationRef etc. resolve normally.
+    // Do NOT destroy this injector early — the adapter holds references to services
+    // resolved through it (e.g. EnvironmentInjector stored in WijmoDropdownAdapter).
+    this._adapterInjector = createEnvironmentInjector([AdapterClass], this._envInjector);
+
+    this._adapter = this._adapterInjector.get(AdapterClass);
+  }
 
   // ─── Signal inputs ─────────────────────────────────────────────────────────
 
@@ -194,6 +222,20 @@ export class DropdownWrapperComponent
   /** Current value held by this control (synced to/from CVA) */
   private readonly _value = signal<any>(null);
 
+  /**
+   * Tracks disabled state set by Angular forms (form.disable() / control.disable()).
+   * Angular calls setDisabledState() automatically — we store it here so it can
+   * be merged with the [disabled] input without either one overwriting the other.
+   */
+  private readonly _formDisabled = signal(false);
+
+  /**
+   * Single source of truth for disabled state fed to the adapter.
+   * True when EITHER [disabled]="true" is bound on the element OR
+   * the parent form/control has been disabled programmatically.
+   */
+  readonly effectiveDisabled = computed(() => this.disabled() || this._formDisabled());
+
   // ─── CVA callbacks ─────────────────────────────────────────────────────────
 
   private _onChange: (value: any) => void = () => {};
@@ -204,7 +246,7 @@ export class DropdownWrapperComponent
 
   readonly effectiveItems = computed(() => {
     const raw = this.itemsSource() ?? [];
-    const sentinel = this.showSelect() && this.displayMemberPath() ? [this._makeSentinel()] : [];
+    const sentinel = this.showSelect() ? [this._makeSentinel()] : [];
     return [...sentinel, ...raw];
   });
 
@@ -214,7 +256,7 @@ export class DropdownWrapperComponent
     if (this.cssClass()) parts.push(this.cssClass());
     if (this.isFocused()) parts.push('wj-state-focused');
     if (this.isDroppedDown()) parts.push('wj-state-dropped-down');
-    if (this.disabled()) parts.push('wj-state-disabled');
+    if (this.effectiveDisabled()) parts.push('wj-state-disabled');
     if (this.readonly()) parts.push('wj-state-readonly');
     if (this.isInvalid()) parts.push('wj-state-invalid');
     return parts.join(' ');
@@ -249,11 +291,11 @@ export class DropdownWrapperComponent
       { injector: this._injector },
     );
 
-    // React to disabled changes
+    // React to disabled changes — covers both [disabled] input and form.disable()
     effect(
       () => {
         if (this._adapterReady()) {
-          this._adapter.setDisabled(this.disabled());
+          this._adapter.setDisabled(this.effectiveDisabled());
         }
       },
       { injector: this._injector },
@@ -272,6 +314,9 @@ export class DropdownWrapperComponent
 
   ngOnDestroy(): void {
     this._adapter.destroy();
+    // Destroy the per-instance child injector AFTER the adapter,
+    // so any cleanup the adapter does can still resolve injected services.
+    this._adapterInjector.destroy();
   }
 
   // ─── ControlValueAccessor ──────────────────────────────────────────────────
@@ -292,10 +337,9 @@ export class DropdownWrapperComponent
   }
 
   setDisabledState(isDisabled: boolean): void {
-    // The form module may call this; we reflect it through the adapter
-    if (this._adapterReady()) {
-      this._adapter.setDisabled(isDisabled);
-    }
+    // Write to the internal signal — the effect() watching effectiveDisabled()
+    // will pick this up and forward it to the adapter, keeping a single code path.
+    this._formDisabled.set(isDisabled);
   }
 
   // ─── Validator ─────────────────────────────────────────────────────────────
@@ -374,7 +418,7 @@ export class DropdownWrapperComponent
       caseSensitiveSearch: cfg.caseSensitiveSearch ?? false,
       autoExpandSelection: cfg.autoExpandSelection ?? true,
       header: cfg.header ?? '',
-      isDisabled: this.disabled(),
+      isDisabled: this.effectiveDisabled(),
       isReadOnly: this.readonly(),
 
       onValueChange: (event) => this._onAdapterValueChange(event),
