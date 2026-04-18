@@ -1,0 +1,40 @@
+<!-- Outer wrapper: carries state CSS classes -->
+<div class="wj-combo-wrapper" [class]="_cssClass()">
+
+  <!--
+    The adapter mounts its underlying control (Wijmo ComboBox, mat-select, etc.)
+    onto this element in ngAfterViewInit.
+  -->
+  <div
+    #adapterHost
+    class="dropdown-adapter-host"
+    [id]="id()"
+    [attr.aria-label]="ariaLabel() || label()"
+    [attr.aria-describedby]="ariaDescribedBy() || (isInvalid() ? id() + '-error' : null)"
+    [attr.aria-required]="required()"
+    [attr.aria-invalid]="isInvalid()">
+  </div>
+
+  <!-- Floating label -->
+  @if (showLabel() && label()) {
+  <label [attr.for]="id()" [class.active]="isFocused() || hasValue()">
+    {{ label() }}
+    @if (required()) {
+    <span class="required-asterisk" aria-hidden="true"> *</span>
+    }
+  </label>
+  }
+
+
+  <!-- Validation error message -->
+  @if (isInvalid()) {
+  <span
+    class="text-danger visible"
+    role="alert"
+    aria-live="polite"
+    [attr.id]="id() + '-error'">
+    {{ getErrorMessage() }}
+  </span>
+  }
+
+</div>
