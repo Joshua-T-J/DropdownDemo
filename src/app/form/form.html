@@ -1,0 +1,49 @@
+<div class="container">
+    @let data=UserForm.value;
+    @if(data){
+    <pre>{{ data | json }}</pre>
+    }
+    @else{
+    <p>No form data</p>
+    }
+    <div class="row mt-5 justify-content-center">
+        <div class="col-3">
+            <button type="button" class="btn btn-secondary me-3" (click)="loadFormData()">Load Data</button>
+            <button type="button" class="btn btn-secondary" (click)="Disabled = !Disabled">Edit</button>
+        </div>
+        <form [formGroup]="UserForm" (ngSubmit)="formSubmit()">
+            <div class="col-9">
+                <div class="mb-3">
+                    <label for="exampleFormControlInput1" class="form-label">Email address</label>
+                    <input type="email" class="form-control" formControlName="email" id="exampleFormControlInput1">
+                </div>
+                <div class="mb-3">
+                    <label for="exampleFormControlInput2" class="form-label">Name</label>
+                    <input type="text" class="form-control" formControlName="name" id="exampleFormControlInput2">
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="Contries" formControlName="country" (selectedValueChange)="countryChange($event)"
+                            [displayMemberPath]="'CountryName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="FilteredStates" formControlName="state" (selectedValueChange)="stateChange($event)"
+                            [displayMemberPath]="'StateName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="FilteredCities" formControlName="city"
+                            [displayMemberPath]="'CityName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit</button>
+            <button type="reset" class="btn btn-primary">Reset</button>
+        </form>
+    </div>
+</div>
