@@ -26,8 +26,6 @@ import { takeUntil } from 'rxjs/operators';
   standalone: true,
   imports: [MatFormFieldModule, MatSelectModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // 'data-mat-adapter' forces Angular to generate a unique component ID,
-  // preventing NG0912 collisions when multiple instances exist in the same app.
   host: { 'data-mat-adapter': '' },
   template: `
     <mat-form-field style="width: 100%;">
@@ -38,6 +36,9 @@ import { takeUntil } from 'rxjs/operators';
         [panelClass]="panelClass"
         [value]="value"
       >
+        @if (showSelect) {
+          <mat-option [value]="null">{{ selectLabel }}</mat-option>
+        }
         @for (item of items; track $index) {
           <mat-option [value]="resolveValue(item)">
             {{ resolveText(item) }}
@@ -57,6 +58,8 @@ class MaterialDropdownAdapterHostComponent {
   panelClass = '';
   disabled = false;
   value: any = null;
+  showSelect = true;
+  selectLabel = '-- Select --';
 
   resolveText(item: any): string {
     if (!this.displayMemberPath) return `${item ?? ''}`;
@@ -93,13 +96,15 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
       environmentInjector: this._environmentInjector,
     });
 
-    componentRef.instance.items = options.itemsSource ?? [];
+    componentRef.instance.items = this._stripSentinel(options.itemsSource);
     componentRef.instance.displayMemberPath = options.displayMemberPath;
     componentRef.instance.selectedValuePath = options.selectedValuePath;
     componentRef.instance.placeholder = options.placeholder;
     componentRef.instance.panelClass = options.dropDownCssClass;
     componentRef.instance.disabled = options.isDisabled || options.isReadOnly;
     componentRef.instance.value = this._value;
+    componentRef.instance.showSelect = options.showSelect ?? true;
+    componentRef.instance.selectLabel = options.selectLabel ?? '-- Select --';
 
     this._appRef.attachView(componentRef.hostView);
     this._hostEl.replaceChildren(componentRef.location.nativeElement);
@@ -154,7 +159,7 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
 
   setItemsSource(items: any[]): void {
     if (this._componentRef) {
-      this._componentRef.instance.items = items;
+      this._componentRef.instance.items = this._stripSentinel(items);
       this._componentRef.changeDetectorRef.detectChanges();
     }
   }
@@ -229,6 +234,10 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     this._removeBlurListener = null;
     this._hostEl = null;
     this._opts = null;
+  }
+
+  private _stripSentinel(items: any[]): any[] {
+    return (items ?? []).filter((i) => !i?.__sentinel__);
   }
 
   private _bindHostEvent(eventName: 'focus' | 'blur', handler: () => void): () => void {

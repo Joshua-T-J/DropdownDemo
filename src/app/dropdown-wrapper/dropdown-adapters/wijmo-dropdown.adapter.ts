@@ -8,10 +8,7 @@ import {
 } from '@angular/core';
 import * as wjcCore from '@mescius/wijmo';
 import * as WjInputModule from '@mescius/wijmo.angular2.input';
-import {
-  DropdownAdapter,
-  DropdownAdapterOptions,
-} from './dropdown-adapter.interface';
+import { DropdownAdapter, DropdownAdapterOptions } from './dropdown-adapter.interface';
 
 /**
  * Wijmo ComboBox adapter using the Angular WjComboBox component.
@@ -22,7 +19,6 @@ import {
  */
 @Injectable()
 export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjComboBox> {
-
   private readonly _appRef = inject(ApplicationRef);
   private readonly _envInjector = inject(EnvironmentInjector);
 
@@ -103,10 +99,14 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
 
   setValue(value: any): void {
     const combo = this._combo;
-    if (combo) {
+    if (!combo) return;
+    if (value === null || value === undefined || value === '') {
+      combo.selectedIndex = -1;
+      combo.text = '';
+    } else {
       combo.selectedValue = value;
-      this._compRef?.changeDetectorRef.detectChanges();
     }
+    this._compRef?.changeDetectorRef.detectChanges();
   }
 
   setItemsSource(items: any[]): void {
@@ -155,7 +155,7 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
   clear(): void {
     const combo = this._combo;
     if (combo) {
-      combo.selectedValue = null;
+      combo.selectedIndex = -1;
       combo.text = '';
       this._compRef?.changeDetectorRef.detectChanges();
     }

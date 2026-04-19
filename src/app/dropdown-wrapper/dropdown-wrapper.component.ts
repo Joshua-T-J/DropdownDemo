@@ -158,10 +158,18 @@ export class DropdownWrapperComponent
   readonly showClearButton = input<boolean>(false);
 
   /**
-   * Show a "-- Select --" sentinel item when the list is empty or always.
+   * When true, a "-- Select --" option is prepended to the list.
+   * Only meaningful for adapters that render it as a real list item (e.g. Material).
+   * Wijmo uses its native placeholder instead — no sentinel item is needed.
    * Defaults to true.
    */
   readonly showSelect = input<boolean>(true);
+
+  /**
+   * The text shown for the empty/sentinel option and as the Wijmo placeholder.
+   * Defaults to '-- Select --'.
+   */
+  readonly selectLabel = input<string>('-- Select --');
 
   /**
    * Auto-select the item when only one exists in itemsSource.
@@ -242,12 +250,17 @@ export class DropdownWrapperComponent
   private _onTouched: () => void = () => {};
   private _onValidatorChange: () => void = () => {};
 
-  // ─── Computed: effective items (with sentinel + auto-select logic) ──────────
+  // ─── Computed: effective items ─────────────────────────────────────────────
 
+  /**
+   * Items passed to the adapter. When showSelect is true, a sentinel object is
+   * prepended — both Wijmo and Material treat it as a real selectable item at
+   * the top of the list. Selecting it emits null (handled in _onAdapterValueChange).
+   */
   readonly effectiveItems = computed(() => {
     const raw = this.itemsSource() ?? [];
-    const sentinel = this.showSelect() ? [this._makeSentinel()] : [];
-    return [...sentinel, ...raw];
+    if (!this.showSelect()) return raw;
+    return [this._makeSentinel(), ...raw];
   });
 
   /** CSS class string for the wrapper */
@@ -323,6 +336,7 @@ export class DropdownWrapperComponent
 
   writeValue(value: any): void {
     this._value.set(value);
+    this.selectedValue.set(value); // keep model in sync with form CVA writes
     if (this._adapterReady()) {
       this._adapter.setValue(value);
     }
@@ -404,6 +418,10 @@ export class DropdownWrapperComponent
     const cfg = this.config() ?? {};
     const items = this.effectiveItems();
 
+    // When showSelect is true and no explicit placeholder is set, use selectLabel
+    // as the placeholder text. Wijmo renders this natively; Material uses a sentinel item.
+    const placeholder = this.placeholder() || (this.showSelect() ? this.selectLabel() : '');
+
     const options: DropdownAdapterOptions = {
       hostElement: this.adapterHostRef.nativeElement,
       itemsSource: items,
@@ -413,13 +431,15 @@ export class DropdownWrapperComponent
       showDropDownButton: cfg.showDropDownButton ?? true,
       maxDropDownHeight: cfg.maxDropDownHeight ?? 200,
       dropDownCssClass: cfg.dropDownCssClass ?? '',
-      placeholder: this.placeholder(),
+      placeholder,
       isAnimated: cfg.isAnimated ?? true,
       caseSensitiveSearch: cfg.caseSensitiveSearch ?? false,
       autoExpandSelection: cfg.autoExpandSelection ?? true,
       header: cfg.header ?? '',
       isDisabled: this.effectiveDisabled(),
       isReadOnly: this.readonly(),
+      showSelect: this.showSelect(),
+      selectLabel: this.selectLabel(),
 
       onValueChange: (event) => this._onAdapterValueChange(event),
       onFocus: () => this._onAdapterFocus(),
@@ -449,12 +469,12 @@ export class DropdownWrapperComponent
 
   private _handleAutoSelect(items: any[]): void {
     if (!this.autoSelectSingle()) return;
-    // Filter out the sentinel item
+    // Exclude the sentinel — only count real data items
     const real = items.filter((i) => !i?.__sentinel__);
     if (real.length !== 1) return;
     const item = real[0];
     const value = this.selectedValuePath() ? item[this.selectedValuePath()] : item;
-    // Only auto-select if no value already set
+    // Only auto-select if no value is already set
     if (this._value() === null || this._value() === undefined) {
       const text = this.displayMemberPath() ? item[this.displayMemberPath()] : `${item}`;
       this._setValue(value, item, 0, text);
@@ -509,6 +529,7 @@ export class DropdownWrapperComponent
   }
 
   private _makeSentinel(): any {
-    return { __sentinel__: true, [this.displayMemberPath() || 'label']: '-- Select --' };
+    const key = this.displayMemberPath() || 'label';
+    return { __sentinel__: true, [key]: this.selectLabel() };
   }
 }

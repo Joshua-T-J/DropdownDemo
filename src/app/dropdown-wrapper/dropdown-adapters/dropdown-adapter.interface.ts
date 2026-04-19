@@ -57,6 +57,16 @@ export interface DropdownAdapterOptions {
   /** Make the input read-only */
   isReadOnly: boolean;
 
+  /**
+   * When true, the adapter should show an empty/placeholder option.
+   * - Wijmo: uses native placeholder (no extra item in the list)
+   * - Material: prepends a sentinel <mat-option> with selectLabel text
+   */
+  showSelect: boolean;
+
+  /** Text for the empty sentinel option / Wijmo placeholder */
+  selectLabel: string;
+
   // ─── Callbacks from wrapper → adapter ──────────────────────────────────────
 
   /** Called whenever the selected value changes */
@@ -146,13 +156,11 @@ export interface DropdownAdapter<TControl = unknown> {
  * @Component({ providers: [{ provide: DROPDOWN_ADAPTER_CLASS, useValue: MyAdapter }] })
  */
 export const DROPDOWN_ADAPTER_CLASS = new InjectionToken<new (...args: any[]) => DropdownAdapter>(
-  'DropdownAdapterClass'
+  'DropdownAdapterClass',
 );
 
 /**
  * Token for the adapter INSTANCE resolved per component.
  * Override DROPDOWN_ADAPTER_CLASS, not this token.
  */
-export const DROPDOWN_ADAPTER = new InjectionToken<DropdownAdapter>(
-  'DropdownAdapter'
-);
+export const DROPDOWN_ADAPTER = new InjectionToken<DropdownAdapter>('DropdownAdapter');
