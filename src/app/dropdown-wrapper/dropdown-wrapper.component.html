@@ -29,9 +29,9 @@
   @if (showLabel() && label()) {
   <label [attr.for]="id()" [class.active]="isFocused() || hasValue()">
     {{ label() }}
-    @if (required()) {
+    <!-- @if (effectiveRequired()) {
     <span class="wj-required-marker" aria-hidden="true"> *</span>
-    }
+    } -->
   </label>
   }
 
@@ -54,7 +54,7 @@
   }
 
   <!-- Validation error message -->
-  @if (isInvalid()) {
+  @if (isInvalid() && showInvalid()) {
   <span
     class="text-danger visible"
     role="alert"

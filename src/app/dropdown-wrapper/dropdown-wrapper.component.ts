@@ -29,6 +29,7 @@ import {
   ValidationErrors,
   Validator,
   ValidatorFn,
+  Validators,
   NG_VALIDATORS,
   NG_VALUE_ACCESSOR,
 } from '@angular/forms';
@@ -224,6 +225,9 @@ export class DropdownWrapperComponent
   /** Advanced adapter config */
   readonly config = input<DropdownConfig>({});
 
+  /** Show invalid state and error messages */
+  readonly showInvalid = input<boolean>(false);
+
   /** Custom validators from the parent */
   readonly customValidators = input<ValidatorFn[]>([]);
 
@@ -325,6 +329,21 @@ export class DropdownWrapperComponent
    */
   readonly effectiveDisabled = computed(() => this.disabled() || this._formDisabled());
 
+  /**
+   * Tracks whether the bound AbstractControl carries Validators.required.
+   * Populated in ngAfterViewInit by subscribing to statusChanges and checking
+   * ctrl.hasValidator(Validators.required). Merged with the [required] input
+   * in effectiveRequired so the component reacts to both sources.
+   */
+  private readonly _formRequired = signal(false);
+
+  /**
+   * Single source of truth for required state.
+   * True when EITHER [required]="true" is bound on the element OR
+   * the parent FormControl carries Validators.required.
+   */
+  readonly effectiveRequired = computed(() => this.required() || this._formRequired());
+
   // ─── CVA callbacks ─────────────────────────────────────────────────────────
 
   private _onChange: (value: any) => void = () => {};
@@ -391,17 +410,45 @@ export class DropdownWrapperComponent
    * list; selecting it emits null (handled in _onAdapterValueChange). The Material
    * adapter strips the sentinel internally and renders its own <mat-option> instead.
    */
+  /**
+   * Items passed to the adapter — tracks ONLY itemsSource + showSelect.
+   *
+   * Sentinel suppression for required single-item lists is intentionally NOT
+   * computed here. Reading effectiveRequired() inside this computed would make
+   * the items effect re-run on every required-state change (e.g. setValidators),
+   * triggering spurious setItemsSource / _handleAutoSelect / itemsSourceLoaded
+   * calls with no actual items change. Instead, required-aware suppression is
+   * applied inside untracked() in the items effect and in a dedicated
+   * effectiveRequired-change effect, both of which read effectiveRequired()
+   * outside the reactive tracking scope.
+   */
   readonly effectiveItems = computed(() => {
     const raw = this.itemsSource() ?? [];
-
-    // Suppress the sentinel when exactly one real item exists and auto-selection
-    // will pick it automatically — a placeholder would never be needed.
-    const singleAutoSelect =
-      raw.length === 1 && (this.autoSelectSingle() || this.autoSelectFirst());
-
-    if (!this.showSelect() || singleAutoSelect) return raw;
+    if (!this.showSelect()) return raw;
     return [this._makeSentinel(), ...raw];
   });
+
+  /**
+   * Whether the sentinel should be suppressed in favour of auto-selection.
+   * A pure function so it can be called from inside untracked() contexts without
+   * creating reactive dependencies.
+   */
+  private _shouldSuppressSentinel(rawItems: any[]): boolean {
+    return (
+      this.effectiveRequired() &&
+      rawItems.length === 1 &&
+      (this.autoSelectSingle() || this.autoSelectFirst())
+    );
+  }
+
+  /**
+   * The items list actually sent to the adapter.
+   * Used by _initAdapter and the required-change effect where we need the
+   * suppression-aware list without re-running the items effect.
+   */
+  private _adapterItems(rawItems: any[]): any[] {
+    return this._shouldSuppressSentinel(rawItems) ? rawItems : this.effectiveItems();
+  }
 
   /** CSS class string for the wrapper */
   readonly _cssClass = computed(() => {
@@ -411,7 +458,7 @@ export class DropdownWrapperComponent
     if (this.isDroppedDown()) parts.push('wj-state-dropped-down');
     if (this.effectiveDisabled()) parts.push('wj-state-disabled');
     if (this.readonly()) parts.push('wj-state-readonly');
-    if (this.isInvalid()) parts.push('wj-state-invalid');
+    if (this.isInvalid() && this.showInvalid()) parts.push('wj-state-invalid');
     return parts.join(' ');
   });
 
@@ -481,6 +528,17 @@ export class DropdownWrapperComponent
         ctrl.markAsDirty = original.markAsDirty;
         ctrl.markAsPristine = original.markAsPristine;
       });
+
+      // ── Track form-level Validators.required reactively ──────────────────
+      // The [required] input only covers explicit template bindings. When the
+      // parent sets required via the FormControl validator (Validators.required
+      // or setValidators), we detect it here and mirror it into _formRequired
+      // so effectiveRequired stays in sync and effectiveItems can gate sentinel
+      // suppression / auto-select correctly.
+      const syncRequired = () => this._formRequired.set(ctrl.hasValidator(Validators.required));
+      syncRequired(); // initial read
+      const reqSub = ctrl.statusChanges.subscribe(() => syncRequired());
+      this._destroyRef.onDestroy(() => reqSub.unsubscribe());
     }
 
     // React to itemsSource changes after init.
@@ -500,27 +558,25 @@ export class DropdownWrapperComponent
         untracked(() => {
           if (!this._adapterReady()) return;
 
-          this._adapter.setItemsSource(items);
+          // Apply required-aware sentinel suppression here, inside untracked(),
+          // so effectiveRequired is NOT a reactive dependency of this effect.
+          const raw = this.itemsSource() ?? [];
+          const adapterItems = this._shouldSuppressSentinel(raw) ? raw : items;
 
-          // ── Value-invalidation ────────────────────────────────────────────
-          // After the first run, whenever itemsSource changes we must check
-          // whether the current value still exists in the new list. If it does
-          // not (e.g. FilteredStates becomes [] after a country reset, or a
-          // single-item list that was auto-selected is replaced), clear the
-          // value so the adapter shows the placeholder and _handleAutoSelect
-          // can re-evaluate from a clean slate.
+          this._adapter.setItemsSource(adapterItems);
+
           if (!_firstItemsRun) {
-            this._clearIfNotInSource(items);
+            this._clearIfNotInSource(adapterItems);
           }
 
-          this._handleAutoSelect(items, generationAtSchedule);
+          this._handleAutoSelect(adapterItems, generationAtSchedule);
 
           if (_firstItemsRun) {
             _firstItemsRun = false;
             return;
           }
 
-          const realItems = items.filter((i) => !i?.__sentinel__);
+          const realItems = adapterItems.filter((i) => !i?.__sentinel__);
           this.itemsSourceLoaded.emit({
             items: realItems,
             currentValue: this._value(),
@@ -529,6 +585,22 @@ export class DropdownWrapperComponent
               this._adapter.setValue(value);
             },
           });
+        });
+      },
+      { injector: this._injector },
+    );
+
+    // React to effectiveRequired changes — re-evaluate sentinel suppression and
+    // auto-select without triggering the itemsSource effect.
+    effect(
+      () => {
+        void this.effectiveRequired(); // ← tracked
+        untracked(() => {
+          if (!this._adapterReady()) return;
+          const raw = this.itemsSource() ?? [];
+          const adapterItems = this._shouldSuppressSentinel(raw) ? raw : this.effectiveItems();
+          this._adapter.setItemsSource(adapterItems);
+          this._handleAutoSelect(adapterItems, this._resetGeneration);
         });
       },
       { injector: this._injector },
@@ -567,12 +639,20 @@ export class DropdownWrapperComponent
   // ─── ControlValueAccessor ──────────────────────────────────────────────────
 
   writeValue(value: any): void {
-    // Bump the reset generation whenever the form pushes null/undefined (i.e.
-    // FormGroup.reset()). _handleAutoSelect captures this counter and skips
-    // auto-selection if the generation has advanced since it was last read,
-    // preventing an auto-select from immediately undoing the reset.
     if (value === null || value === undefined) {
+      // Bump generation so any _handleAutoSelect scheduled before this reset
+      // is skipped when it runs.
       this._resetGeneration++;
+
+      // Cancel any pending coalesced emit (e.g. from a preceding auto-select
+      // that queued a non-null value in the same or previous task). Without
+      // this, the microtask flush fires AFTER writeValue and re-emits the
+      // stale auto-selected value to _onChange, overwriting the reset in the
+      // form control and on selectedItemChange.
+      this._pendingEmitValue = null;
+      this._pendingEmitEvent = { value: null, item: null, index: -1, text: '' };
+      // Leave _emitScheduled=true if already set — the flush will still run
+      // but now drains null instead of the stale value.
     }
     this._value.set(value);
     this.selectedValue.set(value); // keep model in sync with form CVA writes
@@ -645,8 +725,9 @@ export class DropdownWrapperComponent
 
   getErrorMessage(): string {
     const errors = this._runValidation();
+    const label = this.label() || 'This field';
     if (!errors) return '';
-    if (errors['required']) return 'This field is required.';
+    if (errors['required']) return `${label} is required.`;
     if (errors['custom']) return errors['custom'];
     return 'Invalid value.';
   }
@@ -655,7 +736,9 @@ export class DropdownWrapperComponent
 
   private _initAdapter(): void {
     const cfg = this.config() ?? {};
-    const items = this.effectiveItems();
+    // Apply required-aware sentinel suppression at init time.
+    const raw = this.itemsSource() ?? [];
+    const items = this._shouldSuppressSentinel(raw) ? raw : this.effectiveItems();
 
     // When showSelect is true and no explicit placeholder is set, use selectLabel
     // as the placeholder text. Wijmo renders this natively; Material uses a sentinel item.
@@ -680,7 +763,7 @@ export class DropdownWrapperComponent
       showSelect: this.showSelect(),
       selectLabel: this.selectLabel(),
       ariaLabel: this.ariaLabel() || this.label(),
-      required: this.required(),
+      required: this.effectiveRequired(),
 
       onValueChange: (event) => this._onAdapterValueChange(event),
       onFocus: () => this._onAdapterFocus(),
@@ -779,8 +862,9 @@ export class DropdownWrapperComponent
     if (this.autoSelectFirst()) {
       // Select the first real item regardless of list size
       target = real[0];
-    } else if (this.autoSelectSingle() && real.length === 1) {
-      // Select only when exactly one real item exists
+    } else if (this.autoSelectSingle() && real.length === 1 && this.effectiveRequired()) {
+      // Auto-select only when the field is required — if optional the user must
+      // always be able to reach an unselected state via -- Select --.
       target = real[0];
     }
 
@@ -847,7 +931,7 @@ export class DropdownWrapperComponent
     const value = this._value();
     const errors: ValidationErrors = {};
 
-    if (this.required() && (value === null || value === undefined || value === '')) {
+    if (this.effectiveRequired() && (value === null || value === undefined || value === '')) {
       errors['required'] = true;
     }
 

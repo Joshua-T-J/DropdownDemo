@@ -183,6 +183,15 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     if (this._componentRef) {
       this._componentRef.instance.items = this._stripSentinel(items);
       this._componentRef.changeDetectorRef.detectChanges();
+      // After the option list re-renders, MatSelect must reconcile its internal
+      // _selectionModel against the new <mat-option> set. If we previously called
+      // writeValue(null) to reset, but MatSelect re-renders with new options and
+      // no explicit value reconciliation, it can re-select a stale option whose
+      // object reference still exists in the old selection model. Re-applying
+      // the current _value forces a clean reconciliation every time items change.
+      if (this._matSelect) {
+        this._matSelect.writeValue(this._value);
+      }
     }
   }
 
