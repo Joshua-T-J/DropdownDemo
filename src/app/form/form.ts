@@ -56,6 +56,7 @@ export class Form implements OnInit {
       city: 1, // Assuming this is the ID for a city
       type: 1, // Assuming this is the ID for a type
     });
+    this.selectedCountry = 4; // Set the selected country to trigger state filtering
   }
 
   resetForm() {
@@ -63,6 +64,7 @@ export class Form implements OnInit {
     this.FilteredStates = []; // ← second
     this.FilteredCities = []; // ← third
     this.UserForm.reset(); // ← last: triggers writeValue(null) + microtask emissions
+    this.selectedCountry = undefined;
   }
 
   getData() {

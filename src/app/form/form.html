@@ -1,5 +1,4 @@
 <div class="container">
-    {{selectedCountry | json}}
     <P>Touched - {{UserForm.touched}}</P>
     <P>Valid - {{UserForm.valid}}</P>
     @let data=UserForm.value;
@@ -45,7 +44,7 @@
                 <div class="col-3">
                     <div class="mb-3">
                         <app-dropdown-wrapper [itemsSource]="FilteredStates" (itemsSourceLoaded)="onItemsSourceLoaded('State', $event)" formControlName="state" (selectedItemChange)="stateChange($event)"
-                            [displayMemberPath]="'StateName'" [showInvalid]="true" label="State" [placeholder]="'Select State'" [selectedValuePath]="'id'" [id]="'StateList'"></app-dropdown-wrapper>
+                            [displayMemberPath]="'StateName'" [showErrors]="true" label="State" [placeholder]="'Select State'" [selectedValuePath]="'id'" [id]="'StateList'"></app-dropdown-wrapper>
                         <!-- {{ UserForm.get('state')?.errors | json }}
                         {{ UserForm.get('state')?.touched }} -->
                     </div>
@@ -68,8 +67,7 @@
                 <div class="mb-3">
                     <app-dropdown-wrapper [disabled]="Disabled" [itemsSource]="Contries" [(selectedValue)]="selectedCountry" (selectedItemChange)="countryChange($event)"
                         [displayMemberPath]="'CountryName'" [placeholder]="'Select Country'" [selectedValuePath]="'id'" [id]="'CountryListTest'"></app-dropdown-wrapper>
-                    {{ UserForm.get('country')?.errors | json }}
-                    {{ UserForm.get('country')?.enabled }}
+                    {{ selectedCountry | json }}
                 </div>
             </div>
         </div>
