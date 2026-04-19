@@ -9,6 +9,7 @@ import {
   Injector,
   OnDestroy,
   Optional,
+  Self,
   ViewChild,
   computed,
   createEnvironmentInjector,
@@ -23,6 +24,7 @@ import {
 import {
   AbstractControl,
   ControlValueAccessor,
+  NgControl,
   ValidationErrors,
   Validator,
   ValidatorFn,
@@ -88,6 +90,12 @@ export class DropdownWrapperComponent
   private readonly _destroyRef = inject(DestroyRef);
   private readonly _injector = inject(Injector);
   private readonly _envInjector = inject(EnvironmentInjector);
+
+  // NgControl is resolved lazily in ngAfterViewInit via _injector.get() to
+  // avoid NG0200 circular dependency:
+  // DropdownWrapperComponent → NgControl → NG_VALIDATORS → DropdownWrapperComponent
+  // Injecting it at field/constructor time triggers that cycle.
+  private _ngControl: NgControl | null = null;
 
   /**
    * The adapter instance — one per component, never shared.
@@ -201,8 +209,11 @@ export class DropdownWrapperComponent
   /** Emits after the adapter has fully initialised */
   readonly initialized = output<DropdownAdapter>();
 
-  /** Emits on every value change */
-  readonly selectedValueChange = output<DropdownChangeEvent>();
+  /**
+   * Emits the full change event (value + item + index + text) on every selection.
+   * Use this when you need the selected item object or display text.
+   */
+  readonly selectedItemChange = output<DropdownChangeEvent>();
 
   /** Emits on focus */
   readonly focused = output<void>();
@@ -291,6 +302,57 @@ export class DropdownWrapperComponent
 
   ngAfterViewInit(): void {
     this._initAdapter();
+
+    // ── Sync form control state → our internal signals ────────────────────────
+    //
+    // NgControl is resolved HERE (not at field/constructor time) to avoid NG0200.
+    // By ngAfterViewInit, Angular has already finished setting up the CVA binding
+    // so NgControl is fully available without a circular dependency.
+    this._ngControl = this._injector.get(NgControl, null, { self: true, optional: true });
+
+    if (this._ngControl?.control) {
+      const ctrl = this._ngControl.control;
+
+      // statusChanges doesn't fire for markAsTouched/markAsDirty etc., so we
+      // patch those methods directly to mirror state into our signals.
+      const original = {
+        markAsTouched: ctrl.markAsTouched.bind(ctrl),
+        markAsUntouched: ctrl.markAsUntouched.bind(ctrl),
+        markAsDirty: ctrl.markAsDirty.bind(ctrl),
+        markAsPristine: ctrl.markAsPristine.bind(ctrl),
+      };
+
+      ctrl.markAsTouched = (...args: any[]) => {
+        original.markAsTouched(...args);
+        this.isTouched.set(true);
+        this._onValidatorChange();
+      };
+
+      ctrl.markAsUntouched = (...args: any[]) => {
+        original.markAsUntouched(...args);
+        this.isTouched.set(false);
+        this._onValidatorChange();
+      };
+
+      ctrl.markAsDirty = (...args: any[]) => {
+        original.markAsDirty(...args);
+        this.isDirty.set(true);
+      };
+
+      ctrl.markAsPristine = (...args: any[]) => {
+        original.markAsPristine(...args);
+        this.isDirty.set(false);
+        this.isTouched.set(false);
+        this._onValidatorChange();
+      };
+
+      this._destroyRef.onDestroy(() => {
+        ctrl.markAsTouched = original.markAsTouched;
+        ctrl.markAsUntouched = original.markAsUntouched;
+        ctrl.markAsDirty = original.markAsDirty;
+        ctrl.markAsPristine = original.markAsPristine;
+      });
+    }
 
     // React to itemsSource changes after init
     effect(
@@ -389,7 +451,7 @@ export class DropdownWrapperComponent
 
   clear(): void {
     this._adapter.clear();
-    this._setValue(null, null, -1, '');
+    this._setValue(null);
   }
 
   markAsTouched(): void {
@@ -476,21 +538,21 @@ export class DropdownWrapperComponent
     const value = this.selectedValuePath() ? item[this.selectedValuePath()] : item;
     // Only auto-select if no value is already set
     if (this._value() === null || this._value() === undefined) {
-      const text = this.displayMemberPath() ? item[this.displayMemberPath()] : `${item}`;
-      this._setValue(value, item, 0, text);
+      this._setValue(value);
       this._adapter.setValue(value);
     }
   }
 
   private _onAdapterValueChange(event: DropdownChangeEvent): void {
-    // Ignore sentinel selection
     if (event.item?.__sentinel__) {
-      this._setValue(null, null, -1, '');
+      this._setValue(null);
       return;
     }
-    this._setValue(event.value, event.item, event.index, event.text);
+    // selectedValue model + CVA emit the raw value (selectedValuePath field)
+    this._setValue(event.value);
     this.isDirty.set(true);
-    this.selectedValueChange.emit(event);
+    // selectedItemChange emits the full event for consumers who need the item/text
+    this.selectedItemChange.emit(event);
   }
 
   private _onAdapterFocus(): void {
@@ -506,7 +568,7 @@ export class DropdownWrapperComponent
     this.blurred.emit();
   }
 
-  private _setValue(value: any, _item: any, _index: number, _text: string): void {
+  private _setValue(value: any): void {
     this._value.set(value);
     this.selectedValue.set(value);
     this._onChange(value);
