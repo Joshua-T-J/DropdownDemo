@@ -113,7 +113,12 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
     const combo = this._combo;
     if (!combo) return;
     if (value === null || value === undefined || value === '') {
+      // Set selectedIndex first so Wijmo stops tracking the old item,
+      // then null selectedValue so the internal CollectionView does not
+      // restore the stale selection when itemsSource is next reassigned,
+      // then blank the visible text so the placeholder shows.
       combo.selectedIndex = -1;
+      combo.selectedValue = null;
       combo.text = '';
     } else {
       combo.selectedValue = value;
@@ -123,10 +128,23 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
 
   setItemsSource(items: any[]): void {
     const wj = this._wj;
-    if (wj) {
-      wj.itemsSource = items;
-      this._compRef?.changeDetectorRef.detectChanges();
-    }
+    if (!wj) return;
+
+    // Store current logical value before Wijmo rebuilds its collectionView.
+    // After itemsSource is replaced, Wijmo tries to restore the previous
+    // selectedValue by searching the new list. If that value is no longer
+    // present (e.g. after reset or cascade clear) Wijmo may either leave a
+    // stale text in the input or silently re-select a match from the old
+    // selection model. Re-applying the value we hold after the assignment
+    // ensures Wijmo's state is always consistent with ours.
+    const currentValue = this._combo?.selectedValue ?? null;
+
+    wj.itemsSource = items;
+    this._compRef?.changeDetectorRef.detectChanges();
+
+    // Re-apply: if we hold null, force a full clear so placeholder shows.
+    // If we hold a value, let Wijmo find it in the new list (or leave -1 if absent).
+    this.setValue(currentValue);
   }
 
   setDisabled(isDisabled: boolean): void {
@@ -168,6 +186,7 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
     const combo = this._combo;
     if (combo) {
       combo.selectedIndex = -1;
+      combo.selectedValue = null;
       combo.text = '';
       this._compRef?.changeDetectorRef.detectChanges();
     }
