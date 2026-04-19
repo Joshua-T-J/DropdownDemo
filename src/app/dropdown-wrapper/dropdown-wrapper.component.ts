@@ -333,7 +333,7 @@ export class DropdownWrapperComponent
 
   /** CSS class string for the wrapper */
   readonly _cssClass = computed(() => {
-    const parts: string[] = [];
+    const parts: string[] = ['wj-labeled-input'];
     if (this.cssClass()) parts.push(this.cssClass());
     if (this.isFocused()) parts.push('wj-state-focused');
     if (this.isDroppedDown()) parts.push('wj-state-dropped-down');

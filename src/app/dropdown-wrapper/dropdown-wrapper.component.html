@@ -19,9 +19,6 @@
   @if (showLabel() && label()) {
   <label [attr.for]="id()" [class.active]="isFocused() || hasValue()">
     {{ label() }}
-    @if (required()) {
-    <span class="required-asterisk" aria-hidden="true"> *</span>
-    }
   </label>
   }
 
