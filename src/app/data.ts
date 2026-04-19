@@ -24,6 +24,7 @@ const COUNTRIESANDSTATES = {
     { id: 3, StateName: 'Ontario', countryId: 2 },
     { id: 4, StateName: 'Quebec', countryId: 2 },
     { id: 5, StateName: 'Mexico City', countryId: 3 },
+    { id: 6, StateName: 'Paris', countryId: 5 },
   ],
   // City data
   Table2: [
@@ -32,5 +33,6 @@ const COUNTRIESANDSTATES = {
     { id: 3, CityName: 'Houston', stateId: 2 },
     { id: 4, CityName: 'Dallas', stateId: 2 },
     { id: 5, CityName: 'Toronto', stateId: 3 },
+    { id: 6, CityName: 'Paris', stateId: 6 },
   ],
 };

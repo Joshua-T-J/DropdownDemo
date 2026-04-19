@@ -1,4 +1,7 @@
 <div class="container">
+    {{selectedCountry | json}}
+    <P>Touched - {{UserForm.touched}}</P>
+    <P>Valid - {{UserForm.valid}}</P>
     @let data=UserForm.value;
     @if(data){
     <pre>{{ data | json }}</pre>
@@ -9,7 +12,7 @@
     <div class="row mt-5 justify-content-center">
         <div class="col-3">
             <button type="button" class="btn btn-secondary me-3" (click)="loadFormData()">Load Data</button>
-            <button type="button" class="btn btn-secondary" (click)="Disabled = !Disabled">Edit</button>
+            <button type="button" class="btn btn-secondary" (click)="toggleForm()">Edit</button>
         </div>
         <form [formGroup]="UserForm" (ngSubmit)="formSubmit()">
             <div class="col-9">
@@ -25,25 +28,50 @@
             <div class="row">
                 <div class="col-3">
                     <div class="mb-3">
-                        <app-dropdown-wrapper [itemsSource]="Contries" formControlName="country" (selectedValueChange)="countryChange($event)"
-                            [displayMemberPath]="'CountryName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
-                    </div>
-                </div>
-                <div class="col-3">
-                    <div class="mb-3">
-                        <app-dropdown-wrapper [itemsSource]="FilteredStates" formControlName="state" (selectedValueChange)="stateChange($event)"
-                            [displayMemberPath]="'StateName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
-                    </div>
-                </div>
-                <div class="col-3">
-                    <div class="mb-3">
-                        <app-dropdown-wrapper [itemsSource]="FilteredCities" formControlName="city"
-                            [displayMemberPath]="'CityName'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
+                        <app-dropdown-wrapper [itemsSource]="Types" formControlName="type"
+                            [displayMemberPath]="'type'" label="Type" [placeholder]="'Select Type'" [selectedValuePath]="'id'" [id]="'CountryList'"></app-dropdown-wrapper>
                     </div>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary">Submit</button>
-            <button type="reset" class="btn btn-primary">Reset</button>
+            <div class="row">
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="Contries" formControlName="country" (selectedItemChange)="countryChange($event)"
+                            [displayMemberPath]="'CountryName'" label="Country" [placeholder]="'Select Country'" [selectedValuePath]="'id'" [id]="'CountryList'"></app-dropdown-wrapper>
+                        <!-- {{ UserForm.get('country')?.errors | json }}
+                        {{ UserForm.get('country')?.touched }} -->
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="FilteredStates" (itemsSourceLoaded)="onItemsSourceLoaded('State', $event)" formControlName="state" (selectedItemChange)="stateChange($event)"
+                            [displayMemberPath]="'StateName'" [showInvalid]="true" label="State" [placeholder]="'Select State'" [selectedValuePath]="'id'" [id]="'StateList'"></app-dropdown-wrapper>
+                        <!-- {{ UserForm.get('state')?.errors | json }}
+                        {{ UserForm.get('state')?.touched }} -->
+                    </div>
+                </div>
+                <div class="col-3">
+                    <div class="mb-3">
+                        <app-dropdown-wrapper [itemsSource]="FilteredCities" (itemsSourceLoaded)="onItemsSourceLoaded('City', $event)" formControlName="city" [id]="'CityList'"
+                            [displayMemberPath]="'CityName'" label="City" [placeholder]="'Select City'" [selectedValuePath]="'id'"></app-dropdown-wrapper>
+                        <!-- {{ UserForm.get('city')?.errors | json }}
+                        {{ UserForm.get('city')?.touched }} -->
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary me-2">Submit</button>
+            <button type="button" class="btn btn-primary" (click)="resetForm()">Reset</button>
         </form>
+
+        <div class="row">
+            <div class="col-3">
+                <div class="mb-3">
+                    <app-dropdown-wrapper [disabled]="Disabled" [itemsSource]="Contries" [(selectedValue)]="selectedCountry" (selectedItemChange)="countryChange($event)"
+                        [displayMemberPath]="'CountryName'" [placeholder]="'Select Country'" [selectedValuePath]="'id'" [id]="'CountryListTest'"></app-dropdown-wrapper>
+                    {{ UserForm.get('country')?.errors | json }}
+                    {{ UserForm.get('country')?.enabled }}
+                </div>
+            </div>
+        </div>
     </div>
 </div>
