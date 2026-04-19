@@ -1,7 +1,7 @@
 // ─── Public API barrel ────────────────────────────────────────────────────────
 
 export { DropdownWrapperComponent } from './dropdown-wrapper.component';
-export type { DropdownConfig } from './dropdown-wrapper.component';
+export type { DropdownConfig, ItemsSourceLoadedEvent } from './dropdown-wrapper.component';
 export {
   DROPDOWN_ADAPTER,
   DROPDOWN_ADAPTER_CLASS,

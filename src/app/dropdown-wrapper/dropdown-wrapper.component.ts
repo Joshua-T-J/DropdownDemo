@@ -20,6 +20,7 @@ import {
   model,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   AbstractControl,
@@ -51,6 +52,24 @@ export interface DropdownConfig {
   caseSensitiveSearch?: boolean;
   autoExpandSelection?: boolean;
   header?: string;
+}
+
+/**
+ * Payload emitted by (itemsSourceLoaded).
+ *
+ * Gives the parent everything it needs to restore a pre-fetched value into a
+ * dependent dropdown after its items list has been replaced.
+ */
+export interface ItemsSourceLoadedEvent {
+  /** The new items array, excluding the sentinel "-- Select --" item. */
+  items: any[];
+  /**
+   * Call this to set a value in the dropdown immediately.
+   * Updates both the adapter (visual selection) and the form control / model.
+   */
+  setValue: (value: any) => void;
+  /** The value the control held before the new items arrived. */
+  currentValue: any;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -185,6 +204,14 @@ export class DropdownWrapperComponent
    */
   readonly autoSelectSingle = input<boolean>(true);
 
+  /**
+   * Auto-select the FIRST real item whenever items load (or change) and no
+   * value is currently set. Works regardless of how many items exist.
+   * Takes precedence over autoSelectSingle when both are true.
+   * Defaults to false.
+   */
+  readonly autoSelectFirst = input<boolean>(false);
+
   /** ARIA label override */
   readonly ariaLabel = input<string>('');
 
@@ -214,6 +241,36 @@ export class DropdownWrapperComponent
    * Use this when you need the selected item object or display text.
    */
   readonly selectedItemChange = output<DropdownChangeEvent>();
+
+  /**
+   * Emits every time the items list is replaced (i.e. [itemsSource] binding changes).
+   *
+   * Use this for dependent/cascading dropdowns: when a parent dropdown changes,
+   * you update [itemsSource] on the child, and this output fires once the adapter
+   * has loaded the new list — giving you the right moment to restore a pre-fetched
+   * value (e.g. from a loaded form record) without racing against an empty list.
+   *
+   * Payload:
+   *   items      — the new items array (excluding the sentinel)
+   *   setValue   — call this with a value to select it immediately in the adapter;
+   *                equivalent to patching the form control but works for standalone
+   *                [(selectedValue)] usage too
+   *   currentValue — the value the control currently holds before any setValue call
+   *
+   * @example — cascading state dropdown, restoring a saved value:
+   *
+   *   <app-dropdown-wrapper
+   *     [itemsSource]="filteredStates"
+   *     (itemsSourceLoaded)="onStatesLoaded($event)" />
+   *
+   *   onStatesLoaded({ items, setValue, currentValue }: ItemsSourceLoadedEvent) {
+   *     // e.g. after countryChange filtered states, re-apply a pre-loaded state id
+   *     const saved = this.UserForm.get('state')?.value;
+   *     const exists = items.some(s => s.id === saved);
+   *     if (exists) setValue(saved);   // adapter + form both update
+   *   }
+   */
+  readonly itemsSourceLoaded = output<ItemsSourceLoadedEvent>();
 
   /** Emits on focus */
   readonly focused = output<void>();
@@ -354,14 +411,36 @@ export class DropdownWrapperComponent
       });
     }
 
-    // React to itemsSource changes after init
+    // React to itemsSource changes after init.
+    // Only effectiveItems() is tracked — everything else runs inside untracked()
+    // so that writes to _value / selectedValue inside _handleAutoSelect or
+    // the itemsSourceLoaded setValue callback cannot re-trigger this effect.
+    let _firstItemsRun = true;
     effect(
       () => {
-        const items = this.effectiveItems();
-        if (this._adapterReady()) {
+        const items = this.effectiveItems(); // ← the ONLY tracked read
+
+        untracked(() => {
+          if (!this._adapterReady()) return;
+
           this._adapter.setItemsSource(items);
           this._handleAutoSelect(items);
-        }
+
+          if (_firstItemsRun) {
+            _firstItemsRun = false;
+            return;
+          }
+
+          const realItems = items.filter((i) => !i?.__sentinel__);
+          this.itemsSourceLoaded.emit({
+            items: realItems,
+            currentValue: this._value(),
+            setValue: (value: any) => {
+              this._setValue(value);
+              this._adapter.setValue(value);
+            },
+          });
+        });
       },
       { injector: this._injector },
     );
@@ -369,9 +448,10 @@ export class DropdownWrapperComponent
     // React to disabled changes — covers both [disabled] input and form.disable()
     effect(
       () => {
-        if (this._adapterReady()) {
-          this._adapter.setDisabled(this.effectiveDisabled());
-        }
+        const disabled = this.effectiveDisabled(); // tracked
+        untracked(() => {
+          if (this._adapterReady()) this._adapter.setDisabled(disabled);
+        });
       },
       { injector: this._injector },
     );
@@ -379,9 +459,10 @@ export class DropdownWrapperComponent
     // React to readonly changes
     effect(
       () => {
-        if (this._adapterReady()) {
-          this._adapter.setReadOnly(this.readonly());
-        }
+        const readonly = this.readonly(); // tracked
+        untracked(() => {
+          if (this._adapterReady()) this._adapter.setReadOnly(readonly);
+        });
       },
       { injector: this._injector },
     );
@@ -530,17 +611,27 @@ export class DropdownWrapperComponent
   }
 
   private _handleAutoSelect(items: any[]): void {
-    if (!this.autoSelectSingle()) return;
-    // Exclude the sentinel — only count real data items
+    // Never auto-select if a value is already set
+    if (this._value() !== null && this._value() !== undefined) return;
+
     const real = items.filter((i) => !i?.__sentinel__);
-    if (real.length !== 1) return;
-    const item = real[0];
-    const value = this.selectedValuePath() ? item[this.selectedValuePath()] : item;
-    // Only auto-select if no value is already set
-    if (this._value() === null || this._value() === undefined) {
-      this._setValue(value);
-      this._adapter.setValue(value);
+    if (real.length === 0) return;
+
+    let target: any = null;
+
+    if (this.autoSelectFirst()) {
+      // Select the first real item regardless of list size
+      target = real[0];
+    } else if (this.autoSelectSingle() && real.length === 1) {
+      // Select only when exactly one real item exists
+      target = real[0];
     }
+
+    if (!target) return;
+
+    const value = this.selectedValuePath() ? target[this.selectedValuePath()] : target;
+    this._setValue(value);
+    this._adapter.setValue(value);
   }
 
   private _onAdapterValueChange(event: DropdownChangeEvent): void {
