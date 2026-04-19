@@ -225,11 +225,29 @@ export class DropdownWrapperComponent
   /** Advanced adapter config */
   readonly config = input<DropdownConfig>({});
 
-  /** Show invalid state and error messages */
-  readonly showInvalid = input<boolean>(false);
-
   /** Custom validators from the parent */
   readonly customValidators = input<ValidatorFn[]>([]);
+
+  /**
+   * Whether to show validation errors.
+   * Defaults to false.
+   */
+  readonly showErrors = input<boolean>(false);
+
+  /**
+   * Map of Angular error keys to human-readable messages shown under the field.
+   *
+   * The component already handles 'required' internally. Supply this input to
+   * override the built-in message or to provide messages for any other error key
+   * produced by Validators built-ins or custom validators.
+   *
+   * @example
+   * [errorMessages]="{ required: 'Please choose a country.', custom: 'Invalid selection.' }"
+   *
+   * Keys are checked in insertion order; the first matching key wins.
+   * If no key matches, the fallback "Invalid value." string is shown.
+   */
+  readonly errorMessages = input<Record<string, string>>({});
 
   // ─── Two-way binding: selectedValue ────────────────────────────────────────
 
@@ -458,7 +476,7 @@ export class DropdownWrapperComponent
     if (this.isDroppedDown()) parts.push('wj-state-dropped-down');
     if (this.effectiveDisabled()) parts.push('wj-state-disabled');
     if (this.readonly()) parts.push('wj-state-readonly');
-    if (this.isInvalid() && this.showInvalid()) parts.push('wj-state-invalid');
+    if (this.isInvalid() && this.showErrors()) parts.push('wj-state-invalid');
     return parts.join(' ');
   });
 
@@ -606,6 +624,34 @@ export class DropdownWrapperComponent
       { injector: this._injector },
     );
 
+    // React to selectedValue model changes coming FROM the parent (standalone usage).
+    // When the parent sets [(selectedValue)]="null" or changes the bound variable,
+    // Angular updates the model signal. Without this effect nothing inside the
+    // component reacts to that write — _value and the adapter stay stale.
+    //
+    // Re-entrancy guard: _setValue / writeValue always write _value and selectedValue
+    // together atomically. We compare them here; if they already match, the write
+    // originated inside the component and the adapter is already up to date — skip.
+    effect(
+      () => {
+        const incoming = this.selectedValue(); // tracked
+        untracked(() => {
+          if (!this._adapterReady()) return;
+          if (incoming === this._value()) return; // internal write — adapter already updated
+
+          // External write from parent binding — sync _value and adapter.
+          if (incoming === null || incoming === undefined) {
+            this._resetGeneration++;
+            this._pendingEmitValue = null;
+            this._pendingEmitEvent = { value: null, item: null, index: -1, text: '' };
+          }
+          this._value.set(incoming);
+          this._adapter.setValue(incoming);
+        });
+      },
+      { injector: this._injector },
+    );
+
     // React to disabled changes — covers both [disabled] input and form.disable()
     effect(
       () => {
@@ -725,10 +771,18 @@ export class DropdownWrapperComponent
 
   getErrorMessage(): string {
     const errors = this._runValidation();
-    const label = this.label() || 'This field';
     if (!errors) return '';
-    if (errors['required']) return `${label} is required.`;
-    if (errors['custom']) return errors['custom'];
+
+    const map = this.errorMessages();
+
+    // Walk the active error keys in order. For each key check the caller-supplied
+    // map first, then fall back to the built-in defaults for 'required' / 'custom'.
+    for (const key of Object.keys(errors)) {
+      if (map[key]) return map[key];
+      if (key === 'required') return 'This field is required.';
+      if (key === 'custom' && typeof errors[key] === 'string') return errors[key];
+    }
+
     return 'Invalid value.';
   }
 
