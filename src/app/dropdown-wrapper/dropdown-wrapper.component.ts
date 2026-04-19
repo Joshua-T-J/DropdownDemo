@@ -295,6 +295,19 @@ export class DropdownWrapperComponent
   /** Whether the adapter has been initialised */
   private readonly _adapterReady = signal(false);
 
+  /**
+   * Monotonically-increasing counter bumped every time writeValue(null) is called
+   * (i.e. a programmatic reset). The items effect captures the generation at the
+   * start of each run and compares it inside untracked() — if the generation has
+   * advanced, a reset has occurred and auto-select must be skipped for that run.
+   *
+   * A plain boolean flag + Promise.resolve() microtask is NOT reliable here
+   * because Angular's signal-based effects flush synchronously during change
+   * detection with OnPush, meaning the microtask fires AFTER the effect body
+   * has already run and the flag has been read.
+   */
+  private _resetGeneration = 0;
+
   /** Current value held by this control (synced to/from CVA) */
   private readonly _value = signal<any>(null);
 
@@ -318,16 +331,75 @@ export class DropdownWrapperComponent
   private _onTouched: () => void = () => {};
   private _onValidatorChange: () => void = () => {};
 
+  /**
+   * Coalescing queue for all outbound notifications.
+   *
+   * Multiple synchronous writes (e.g. _clearIfNotInSource → _handleAutoSelect,
+   * or a rapid itemsSource swap) each update _value and the adapter immediately
+   * so UI state is always current, but we must deliver only ONE emission per
+   * microtask — the last written value — to both the CVA form (_onChange) and
+   * the (selectedItemChange) output.
+   *
+   * Without this, Angular's form sees null → undefined → realValue in quick
+   * succession, and parent (selectedItemChange) handlers fire 2-3 times for
+   * a single logical user action (e.g. country change → state clear → city clear).
+   *
+   * Rule: every write path calls _scheduleEmit() instead of calling _onChange()
+   * or selectedItemChange.emit() directly.  _scheduleEmit records the latest
+   * event and, on the first call per synchronous burst, queues one microtask
+   * flush that drains both outputs with the final settled value.
+   */
+  private _pendingEmitValue: any = undefined;
+  private _pendingEmitEvent: DropdownChangeEvent | null = null;
+  private _emitScheduled = false;
+
+  private _scheduleEmit(value: any, event?: DropdownChangeEvent): void {
+    // Always overwrite — earlier intermediate values are discarded.
+    this._pendingEmitValue = value;
+    // event is undefined when called from a non-user-initiated path (auto-select,
+    // source-driven clear); in that case synthesise a minimal event so
+    // selectedItemChange always carries a consistent payload.
+    this._pendingEmitEvent = event ?? { value, item: null, index: -1, text: '' };
+
+    if (this._emitScheduled) return; // one flush already queued for this burst
+    this._emitScheduled = true;
+
+    Promise.resolve().then(() => {
+      this._emitScheduled = false;
+      // Read at flush time to pick up the very last synchronous write.
+      const finalValue = this._pendingEmitValue;
+      const finalEvent = this._pendingEmitEvent!;
+      this._onChange(finalValue);
+      this.selectedItemChange.emit(finalEvent);
+    });
+  }
+
   // ─── Computed: effective items ─────────────────────────────────────────────
 
   /**
-   * Items passed to the adapter. When showSelect is true, a sentinel object is
-   * prepended — both Wijmo and Material treat it as a real selectable item at
-   * the top of the list. Selecting it emits null (handled in _onAdapterValueChange).
+   * Items passed to the adapter.
+   *
+   * Sentinel suppression rule:
+   *   When the list collapses to a single real item AND auto-selection is active
+   *   (autoSelectSingle=true or autoSelectFirst=true), the "-- Select --" sentinel
+   *   is omitted. There is nothing to choose from — the value is predetermined —
+   *   so presenting a placeholder option would be misleading to both sighted users
+   *   and screen readers.
+   *
+   * In all other cases where showSelect is true, a sentinel object is prepended.
+   * Both Wijmo and Material treat it as a real selectable item at the top of the
+   * list; selecting it emits null (handled in _onAdapterValueChange). The Material
+   * adapter strips the sentinel internally and renders its own <mat-option> instead.
    */
   readonly effectiveItems = computed(() => {
     const raw = this.itemsSource() ?? [];
-    if (!this.showSelect()) return raw;
+
+    // Suppress the sentinel when exactly one real item exists and auto-selection
+    // will pick it automatically — a placeholder would never be needed.
+    const singleAutoSelect =
+      raw.length === 1 && (this.autoSelectSingle() || this.autoSelectFirst());
+
+    if (!this.showSelect() || singleAutoSelect) return raw;
     return [this._makeSentinel(), ...raw];
   });
 
@@ -420,11 +492,28 @@ export class DropdownWrapperComponent
       () => {
         const items = this.effectiveItems(); // ← the ONLY tracked read
 
+        // Snapshot the reset generation at effect-schedule time (still inside the
+        // reactive context). This is compared inside untracked() below — if reset
+        // has been called between scheduling and execution, we skip auto-select.
+        const generationAtSchedule = this._resetGeneration;
+
         untracked(() => {
           if (!this._adapterReady()) return;
 
           this._adapter.setItemsSource(items);
-          this._handleAutoSelect(items);
+
+          // ── Value-invalidation ────────────────────────────────────────────
+          // After the first run, whenever itemsSource changes we must check
+          // whether the current value still exists in the new list. If it does
+          // not (e.g. FilteredStates becomes [] after a country reset, or a
+          // single-item list that was auto-selected is replaced), clear the
+          // value so the adapter shows the placeholder and _handleAutoSelect
+          // can re-evaluate from a clean slate.
+          if (!_firstItemsRun) {
+            this._clearIfNotInSource(items);
+          }
+
+          this._handleAutoSelect(items, generationAtSchedule);
 
           if (_firstItemsRun) {
             _firstItemsRun = false;
@@ -478,6 +567,13 @@ export class DropdownWrapperComponent
   // ─── ControlValueAccessor ──────────────────────────────────────────────────
 
   writeValue(value: any): void {
+    // Bump the reset generation whenever the form pushes null/undefined (i.e.
+    // FormGroup.reset()). _handleAutoSelect captures this counter and skips
+    // auto-selection if the generation has advanced since it was last read,
+    // preventing an auto-select from immediately undoing the reset.
+    if (value === null || value === undefined) {
+      this._resetGeneration++;
+    }
     this._value.set(value);
     this.selectedValue.set(value); // keep model in sync with form CVA writes
     if (this._adapterReady()) {
@@ -583,6 +679,8 @@ export class DropdownWrapperComponent
       isReadOnly: this.readonly(),
       showSelect: this.showSelect(),
       selectLabel: this.selectLabel(),
+      ariaLabel: this.ariaLabel() || this.label(),
+      required: this.required(),
 
       onValueChange: (event) => this._onAdapterValueChange(event),
       onFocus: () => this._onAdapterFocus(),
@@ -604,13 +702,72 @@ export class DropdownWrapperComponent
       this._adapter.setValue(initVal);
     }
 
-    // Handle auto-select for single-item lists
-    this._handleAutoSelect(items);
+    // Handle auto-select for single-item lists (generation 0 = no reset has occurred)
+    this._handleAutoSelect(items, this._resetGeneration);
 
     this.initialized.emit(this._adapter);
   }
 
-  private _handleAutoSelect(items: any[]): void {
+  /**
+   * Called every time itemsSource is replaced (after the first init run).
+   *
+   * If the control currently holds a value that is not present in the new
+   * items list, three things happen:
+   *
+   *  1. The internal value, model signal, and CVA form control are all set
+   *     to null — the form sees the field as empty immediately.
+   *  2. selectedItemChange is emitted with value=null so parent handlers
+   *     (e.g. countryChange, stateChange) that listen to that output also
+   *     learn about the clear and can cascade their own downstream resets.
+   *  3. _resetGeneration is bumped so the _handleAutoSelect call that
+   *     immediately follows in the items effect is suppressed — otherwise
+   *     a single-item new list would be auto-selected right after we
+   *     cleared, fighting the reset.
+   *
+   * Returns true when a clear was performed so the caller can decide
+   * whether to skip further processing (currently unused but kept for
+   * future flexibility).
+   */
+  private _clearIfNotInSource(items: any[]): boolean {
+    const current = this._value();
+    if (current === null || current === undefined) return false; // already clear
+
+    const real = items.filter((i) => !i?.__sentinel__);
+
+    // Determine whether the current value exists in the new list.
+    const path = this.selectedValuePath();
+    const exists = path
+      ? real.some((item) => item[path] === current)
+      : real.some((item) => item === current);
+
+    if (exists) return false;
+
+    // Bump generation so _handleAutoSelect is suppressed for this cycle.
+    // Without this, a single-item replacement list would be auto-selected
+    // immediately after clearing, undoing the reset.
+    this._resetGeneration++;
+
+    // Clear internal state.
+    this._value.set(null);
+    this.selectedValue.set(null);
+
+    // Clear the adapter visual — show placeholder / empty state.
+    this._adapter.setValue(null);
+
+    // Route both CVA and selectedItemChange through the coalescing queue.
+    // This null will be overwritten if _handleAutoSelect subsequently selects
+    // a value in the same synchronous burst — only the final value is delivered.
+    this._scheduleEmit(null);
+
+    return true;
+  }
+
+  private _handleAutoSelect(items: any[], scheduledGeneration: number): void {
+    // Skip auto-select if a reset has occurred since this call was scheduled.
+    // _resetGeneration is incremented by writeValue(null); if it has advanced
+    // beyond the generation captured when this call was queued, a reset happened
+    // in between and we must not re-select — that would undo the reset.
+    if (this._resetGeneration !== scheduledGeneration) return;
     // Never auto-select if a value is already set
     if (this._value() !== null && this._value() !== undefined) return;
 
@@ -630,20 +787,35 @@ export class DropdownWrapperComponent
     if (!target) return;
 
     const value = this.selectedValuePath() ? target[this.selectedValuePath()] : target;
-    this._setValue(value);
+    // Update signals immediately so adapter and UI are in sync.
+    this._value.set(value);
+    this.selectedValue.set(value);
     this._adapter.setValue(value);
+    // Schedule emission so auto-select is coalesced with any preceding clear
+    // from _clearIfNotInSource — parent gets one final event, not null then value.
+    this._scheduleEmit(value, {
+      value,
+      item: target,
+      index: -1, // index in the raw list is unknown here without a full lookup
+      text: this.displayMemberPath()
+        ? (target[this.displayMemberPath()] ?? '')
+        : String(target ?? ''),
+    });
   }
 
   private _onAdapterValueChange(event: DropdownChangeEvent): void {
     if (event.item?.__sentinel__) {
-      this._setValue(null);
+      // Sentinel selection = user explicitly cleared — treat as null.
+      this._value.set(null);
+      this.selectedValue.set(null);
+      this._scheduleEmit(null);
       return;
     }
-    // selectedValue model + CVA emit the raw value (selectedValuePath field)
-    this._setValue(event.value);
+    this._value.set(event.value);
+    this.selectedValue.set(event.value);
     this.isDirty.set(true);
-    // selectedItemChange emits the full event for consumers who need the item/text
-    this.selectedItemChange.emit(event);
+    // Pass the real adapter event so selectedItemChange carries item/text/index.
+    this._scheduleEmit(event.value, event);
   }
 
   private _onAdapterFocus(): void {
@@ -659,10 +831,16 @@ export class DropdownWrapperComponent
     this.blurred.emit();
   }
 
+  /**
+   * Internal value setter used only by the public clear() method.
+   * All other write paths (adapter change, auto-select, source-driven clear)
+   * set _value / selectedValue directly and call _scheduleEmit explicitly,
+   * so the full coalescing flow applies to them individually.
+   */
   private _setValue(value: any): void {
     this._value.set(value);
     this.selectedValue.set(value);
-    this._onChange(value);
+    this._scheduleEmit(value);
   }
 
   private _runValidation(): ValidationErrors | null {

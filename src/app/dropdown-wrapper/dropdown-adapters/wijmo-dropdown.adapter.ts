@@ -66,6 +66,18 @@ export class WijmoDropdownAdapter implements DropdownAdapter<WjInputModule.WjCom
 
     cdr.detectChanges();
 
+    // Forward aria attributes onto the Wijmo input element directly.
+    // The outer wrapper div's ARIA is not inherited by the inner focusable input,
+    // so we must set them here after the DOM node exists.
+    const inputEl = domNode.querySelector('input') as HTMLInputElement | null;
+    if (inputEl) {
+      if (options.ariaLabel) inputEl.setAttribute('aria-label', options.ariaLabel);
+      if (options.required) inputEl.setAttribute('aria-required', 'true');
+      // Wijmo renders placeholder natively — it already serves as the aria-placeholder.
+      // Explicitly wire aria-placeholder so AT announces it in placeholder state.
+      if (options.placeholder) inputEl.setAttribute('aria-placeholder', options.placeholder);
+    }
+
     const combo = this._combo;
 
     combo.selectedIndexChanged.addHandler(() => {

@@ -4,21 +4,34 @@
   <!--
     The adapter mounts its underlying control (Wijmo ComboBox, mat-select, etc.)
     onto this element in ngAfterViewInit.
+
+    ARIA split:
+    • aria-label, aria-required, aria-placeholder → forwarded by the adapter
+      directly onto the inner focusable element (mat-select trigger / Wijmo input),
+      because screen readers only read ARIA attributes on the element that actually
+      receives keyboard focus — not on an ancestor wrapper div.
+    • aria-describedby → kept here so the error <span> ID is associated with the
+      host node; adapters that expose their focusable element's describedby can
+      additionally forward it, but the association still works at the wrapper level
+      for most AT.
+    • aria-invalid → kept here as a visual/scripted hook; adapters should also set
+      it on the inner focusable element when the value changes.
   -->
   <div
     #adapterHost
     class="dropdown-adapter-host"
     [id]="id()"
-    [attr.aria-label]="ariaLabel() || label()"
     [attr.aria-describedby]="ariaDescribedBy() || (isInvalid() ? id() + '-error' : null)"
-    [attr.aria-required]="required()"
-    [attr.aria-invalid]="isInvalid()">
+    [attr.aria-invalid]="isInvalid() || null">
   </div>
 
-  <!-- Floating label -->
+  <!-- Floating label — linked to the host div id; adapters should honour this -->
   @if (showLabel() && label()) {
   <label [attr.for]="id()" [class.active]="isFocused() || hasValue()">
     {{ label() }}
+    @if (required()) {
+    <span class="wj-required-marker" aria-hidden="true"> *</span>
+    }
   </label>
   }
 

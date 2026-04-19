@@ -35,9 +35,18 @@ import { takeUntil } from 'rxjs/operators';
         [disabled]="disabled"
         [panelClass]="panelClass"
         [value]="value"
+        [attr.aria-label]="ariaLabel || null"
+        [attr.aria-required]="ariaRequired || null"
+        [attr.aria-placeholder]="placeholder || null"
       >
         @if (showSelect) {
-          <mat-option [value]="null">{{ selectLabel }}</mat-option>
+          <!--
+            The sentinel "-- Select --" option exists purely so the user can
+            clear their selection. It is marked aria-hidden so screen readers
+            do NOT announce it as a real choice; the placeholder text on the
+            mat-select itself already conveys the "nothing selected" prompt.
+          -->
+          <mat-option [value]="null" aria-hidden="true">{{ selectLabel }}</mat-option>
         }
         @for (item of items; track $index) {
           <mat-option [value]="resolveValue(item)">
@@ -60,6 +69,10 @@ class MaterialDropdownAdapterHostComponent {
   value: any = null;
   showSelect = true;
   selectLabel = '-- Select --';
+  /** Forwarded from the wrapper host's aria-label / label */
+  ariaLabel = '';
+  /** Forwarded from the wrapper's required input */
+  ariaRequired: string | null = null;
 
   resolveText(item: any): string {
     if (!this.displayMemberPath) return `${item ?? ''}`;
@@ -105,6 +118,11 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
     componentRef.instance.value = this._value;
     componentRef.instance.showSelect = options.showSelect ?? true;
     componentRef.instance.selectLabel = options.selectLabel ?? '-- Select --';
+    // Forward accessibility attributes so the inner mat-select is correctly
+    // announced by screen readers — the outer wrapper div's ARIA attributes
+    // are not inherited by dynamically-created child elements.
+    componentRef.instance.ariaLabel = options.ariaLabel ?? '';
+    componentRef.instance.ariaRequired = options.required ? 'true' : null;
 
     this._appRef.attachView(componentRef.hostView);
     this._hostEl.replaceChildren(componentRef.location.nativeElement);
@@ -153,7 +171,11 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
       this._componentRef.changeDetectorRef.detectChanges();
     }
     if (this._matSelect) {
-      this._matSelect.value = value;
+      // Use the CVA writeValue path rather than setting .value directly.
+      // Direct assignment to mat-select.value does not reliably deselect when
+      // clearing to null after a selection has been made — writeValue() goes
+      // through the internal _selectionModel which is always authoritative.
+      this._matSelect.writeValue(value);
     }
   }
 
@@ -207,7 +229,7 @@ export class MaterialDropdownAdapter implements DropdownAdapter<MatSelect> {
       this._componentRef.changeDetectorRef.detectChanges();
     }
     if (this._matSelect) {
-      this._matSelect.value = null;
+      this._matSelect.writeValue(null);
     }
   }
 

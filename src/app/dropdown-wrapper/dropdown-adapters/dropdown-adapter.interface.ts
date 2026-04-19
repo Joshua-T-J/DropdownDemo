@@ -60,12 +60,25 @@ export interface DropdownAdapterOptions {
   /**
    * When true, the adapter should show an empty/placeholder option.
    * - Wijmo: uses native placeholder (no extra item in the list)
-   * - Material: prepends a sentinel <mat-option> with selectLabel text
+   * - Material: renders a sentinel <mat-option aria-hidden> with selectLabel text
    */
   showSelect: boolean;
 
   /** Text for the empty sentinel option / Wijmo placeholder */
   selectLabel: string;
+
+  /**
+   * Accessible label forwarded to the inner focusable control.
+   * The outer wrapper div's aria-label is not inherited by dynamically-created
+   * child elements, so adapters must apply it directly to their rendered input.
+   */
+  ariaLabel: string;
+
+  /**
+   * Whether this field is required — forwarded so adapters can set
+   * aria-required on the inner focusable control directly.
+   */
+  required: boolean;
 
   // ─── Callbacks from wrapper → adapter ──────────────────────────────────────
 
